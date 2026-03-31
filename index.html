@@ -54,6 +54,12 @@
     button:active{transform:translateY(1px)}
     .small{font-size:13px;padding:8px 12px;border-radius:8px}
     .muted{opacity:0.65;font-size:13px}
+
+    #wakelock-status{
+      font-size:11px;
+      opacity:0.45;
+      margin-top:-8px;
+    }
   </style>
 </head>
 <body class="dark">
@@ -68,6 +74,7 @@
       <button id="reset" class="small">Reset</button>
     </div>
     <div class="muted">48s (escuro) → 18s (claro) | Alerta vermelho após 4 ciclos + 48s</div>
+    <div id="wakelock-status"></div>
   </div>
 
   <script>
@@ -80,6 +87,7 @@
     const cyclesEl = document.getElementById('cycles');
     const toggleBtn = document.getElementById('toggle');
     const resetBtn = document.getElementById('reset');
+    const wakeLockStatusEl = document.getElementById('wakelock-status');
 
     let running = false;
     let phaseStart = null;
@@ -88,6 +96,54 @@
     let rafId = null;
 
     let completedCycles = 0;
+
+    // ── Wake Lock ────────────────────────────────────────────────
+    let wakeLock = null;
+
+    async function requestWakeLock() {
+      if (!('wakeLock' in navigator)) {
+        wakeLockStatusEl.textContent = '⚠️ Wake Lock não suportado neste navegador';
+        return;
+      }
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLockStatusEl.textContent = '🔆 Tela sempre ligada: ativo';
+        wakeLock.addEventListener('release', () => {
+          wakeLockStatusEl.textContent = '⚪ Wake Lock liberado';
+          wakeLock = null;
+        });
+      } catch (err) {
+        wakeLockStatusEl.textContent = '⚠️ Não foi possível manter tela ligada';
+      }
+    }
+
+    async function releaseWakeLock() {
+      if (wakeLock) {
+        await wakeLock.release();
+        wakeLock = null;
+      }
+      wakeLockStatusEl.textContent = '';
+    }
+
+    // Reativa o Wake Lock ao voltar para a aba (sistema pode liberar ao minimizar)
+    document.addEventListener('visibilitychange', async () => {
+      if (document.hidden) {
+        if (running && rafId) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+      } else {
+        if (running && !rafId) {
+          phaseStart = performance.now() - (phaseDuration - remainingMs);
+          rafId = requestAnimationFrame(tick);
+        }
+        // Reativa wake lock se o cronômetro ainda estiver rodando
+        if (running && !wakeLock) {
+          await requestWakeLock();
+        }
+      }
+    });
+    // ─────────────────────────────────────────────────────────────
 
     function formatSeconds(ms){
       const s = Math.ceil(ms/1000);
@@ -110,12 +166,10 @@
     }
 
     function switchToNextPhase(){
-      // Se estava no 18s e vai voltar para o 48s, completa 1 ciclo
       if(currentPhaseIndex === 1){
         completedCycles++;
       }
 
-      // Alerta somente após 4 ciclos + conclusão de um 48s
       if(currentPhaseIndex === 0 && completedCycles >= 4){
         body.classList.remove('dark','light');
         body.classList.add('alert');
@@ -145,24 +199,26 @@
       rafId = requestAnimationFrame(tick);
     }
 
-    function start(){
+    async function start(){
       if(running) return;
       running = true;
       toggleBtn.textContent = 'Pause';
       phaseStart = performance.now() - (phaseDuration - remainingMs);
       rafId = requestAnimationFrame(tick);
+      await requestWakeLock();
     }
 
-    function pause(){
+    async function pause(){
       if(!running) return;
       running = false;
       toggleBtn.textContent = 'Play';
       if(rafId) cancelAnimationFrame(rafId);
       rafId = null;
+      await releaseWakeLock();
     }
 
-    function reset(){
-      pause();
+    async function reset(){
+      await pause();
       currentPhaseIndex = 0;
       phaseDuration = phases[currentPhaseIndex] * 1000;
       remainingMs = phaseDuration;
@@ -187,20 +243,6 @@
       if(e.code === 'Space'){
         e.preventDefault();
         if(running) pause(); else start();
-      }
-    });
-
-    document.addEventListener('visibilitychange', ()=>{
-      if(document.hidden){
-        if(running && rafId){
-          cancelAnimationFrame(rafId);
-          rafId = null;
-        }
-      } else {
-        if(running && !rafId){
-          phaseStart = performance.now() - (phaseDuration - remainingMs);
-          rafId = requestAnimationFrame(tick);
-        }
       }
     });
   </script>
