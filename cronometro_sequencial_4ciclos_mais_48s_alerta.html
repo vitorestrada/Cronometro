@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Cronômetro Sequencial (48s / 18s)</title>
+  <style>
+    :root{font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;}
+    html,body{height:100%;margin:0}
+
+    body{display:flex;align-items:center;justify-content:center;transition:background-color 0.3s,color 0.3s}
+
+    body.dark{background:#0f172a;color:#e6eef8}
+    body.light{background:#e5e7eb;color:#020617}
+    body.alert{background:#7f1d1d;color:#ffffff}
+
+    .card{
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:18px;
+      padding:36px;
+      border-radius:16px;
+      background:rgba(0,0,0,0.15);
+      box-shadow:0 8px 24px rgba(2,6,23,0.6);
+      min-width:280px;
+      transition:background-color 0.3s,color 0.3s
+    }
+
+    body.light .card{background:rgba(255,255,255,0.75);box-shadow:0 8px 24px rgba(0,0,0,0.25)}
+    body.alert .card{background:rgba(0,0,0,0.25);box-shadow:0 8px 24px rgba(0,0,0,0.6)}
+
+    .label{font-size:14px;opacity:0.8}
+    .time{font-size:96px;font-weight:700;letter-spacing:0.02em}
+    .phase{font-size:18px;opacity:0.85}
+    .cycles{font-size:16px;opacity:0.9}
+    .controls{display:flex;gap:12px}
+
+    button{
+      appearance:none;
+      border:0;
+      background:#1e293b;
+      color:#e6eef8;
+      padding:10px 18px;
+      border-radius:10px;
+      font-size:16px;
+      cursor:pointer;
+      transition:background-color 0.3s,color 0.3s
+    }
+
+    body.light button{background:#334155;color:#ffffff}
+    body.alert button{background:#ffffff;color:#7f1d1d}
+
+    button:active{transform:translateY(1px)}
+    .small{font-size:13px;padding:8px 12px;border-radius:8px}
+    .muted{opacity:0.65;font-size:13px}
+  </style>
+</head>
+<body class="dark">
+  <div class="card" role="main">
+    <div class="label">Cronômetro — marcação em segundos</div>
+    <div class="time" id="time">48</div>
+    <div class="phase" id="phase">Fase: 48 segundos</div>
+    <div class="cycles" id="cycles">Ciclos completos: 0</div>
+
+    <div class="controls">
+      <button id="toggle">Play</button>
+      <button id="reset" class="small">Reset</button>
+    </div>
+    <div class="muted">48s (escuro) → 18s (claro) | Alerta vermelho após 4 ciclos + 48s</div>
+  </div>
+
+  <script>
+    const phases = [48, 18];
+    let currentPhaseIndex = 0;
+
+    const body = document.body;
+    const timeEl = document.getElementById('time');
+    const phaseEl = document.getElementById('phase');
+    const cyclesEl = document.getElementById('cycles');
+    const toggleBtn = document.getElementById('toggle');
+    const resetBtn = document.getElementById('reset');
+
+    let running = false;
+    let phaseStart = null;
+    let phaseDuration = phases[currentPhaseIndex] * 1000;
+    let remainingMs = phaseDuration;
+    let rafId = null;
+
+    let completedCycles = 0;
+
+    function formatSeconds(ms){
+      const s = Math.ceil(ms/1000);
+      return String(s);
+    }
+
+    function applyTheme(){
+      body.classList.remove('dark','light','alert');
+      if(currentPhaseIndex === 0){
+        body.classList.add('dark');
+      } else {
+        body.classList.add('light');
+      }
+    }
+
+    function updateDisplay(ms){
+      timeEl.textContent = formatSeconds(ms);
+      phaseEl.textContent = `Fase: ${phases[currentPhaseIndex]} segundos`;
+      cyclesEl.textContent = `Ciclos completos: ${completedCycles}`;
+    }
+
+    function switchToNextPhase(){
+      // Se estava no 18s e vai voltar para o 48s, completa 1 ciclo
+      if(currentPhaseIndex === 1){
+        completedCycles++;
+      }
+
+      // Alerta somente após 4 ciclos + conclusão de um 48s
+      if(currentPhaseIndex === 0 && completedCycles >= 4){
+        body.classList.remove('dark','light');
+        body.classList.add('alert');
+      }
+
+      currentPhaseIndex = (currentPhaseIndex + 1) % phases.length;
+      phaseDuration = phases[currentPhaseIndex] * 1000;
+      remainingMs = phaseDuration;
+      phaseStart = performance.now();
+
+      if(!body.classList.contains('alert')){
+        applyTheme();
+      }
+    }
+
+    function tick(now){
+      if(!running) return;
+      const elapsed = now - phaseStart;
+      const msLeft = Math.max(0, phaseDuration - elapsed);
+      remainingMs = msLeft;
+      updateDisplay(msLeft);
+
+      if(msLeft <= 0){
+        switchToNextPhase();
+      }
+
+      rafId = requestAnimationFrame(tick);
+    }
+
+    function start(){
+      if(running) return;
+      running = true;
+      toggleBtn.textContent = 'Pause';
+      phaseStart = performance.now() - (phaseDuration - remainingMs);
+      rafId = requestAnimationFrame(tick);
+    }
+
+    function pause(){
+      if(!running) return;
+      running = false;
+      toggleBtn.textContent = 'Play';
+      if(rafId) cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+
+    function reset(){
+      pause();
+      currentPhaseIndex = 0;
+      phaseDuration = phases[currentPhaseIndex] * 1000;
+      remainingMs = phaseDuration;
+      completedCycles = 0;
+      body.classList.remove('light','alert');
+      body.classList.add('dark');
+      updateDisplay(remainingMs);
+    }
+
+    updateDisplay(remainingMs);
+    applyTheme();
+
+    toggleBtn.addEventListener('click', ()=>{
+      if(running) pause(); else start();
+    });
+
+    resetBtn.addEventListener('click', ()=>{
+      reset();
+    });
+
+    window.addEventListener('keydown', (e)=>{
+      if(e.code === 'Space'){
+        e.preventDefault();
+        if(running) pause(); else start();
+      }
+    });
+
+    document.addEventListener('visibilitychange', ()=>{
+      if(document.hidden){
+        if(running && rafId){
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+      } else {
+        if(running && !rafId){
+          phaseStart = performance.now() - (phaseDuration - remainingMs);
+          rafId = requestAnimationFrame(tick);
+        }
+      }
+    });
+  </script>
+</body>
+</html>
